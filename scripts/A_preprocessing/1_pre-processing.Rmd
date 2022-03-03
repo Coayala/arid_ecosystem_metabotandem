@@ -1,0 +1,425 @@
+---
+title: "Data preprocessing - Metabotandem"
+author: "Christian Ayala"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+# 1. Importing Libraries
+
+```{r}
+library(RColorBrewer)
+library(tidyverse)
+library(xcms)
+
+doParallel::registerDoParallel(10)
+
+## customFunnctions.R is from "https://raw.githubusercontent.com/jorainer/xcms-gnps-tools/master/customFunctions.R"
+source("https://raw.githubusercontent.com/jorainer/xcms-gnps-tools/master/customFunctions.R")
+```
+
+## 1 - Import centroid data
+
+```{r}
+
+load("../../data/imported_data.RData")
+```
+
+
+# 2. Data Visualization
+
+`chromatogram` function to extract the:
+Total Ion Chromatogram (TIC) -- > sum of ion intensities
+Base Peak Chromatogram (BPC) -- > the most intense peak in the spectrum
+EIC/XIC Extracted Ion Chromatogram -- > one orfew specific peaks, m/z and rt of the peak
+
+```{r}
+tic <- chromatogram(data, aggregationFun="sum")
+bpc <- chromatogram(data, aggregationFun="max")
+```
+
+Set colors for samples
+
+```{r}
+list_of_colors <- brewer.pal(n = 4, name = 'Dark2')
+
+## color for lines
+groupColors <- list_of_colors[1:length(unique(pData(data)$treatment))]
+names(groupColors) <- unique(pData(data)$treatment)
+```
+
+## 2.1 Plot BPC
+
+```{r}
+
+figure_file <- file.path('..', 'images', 'BPC_centroided_notAligned.png')
+
+png(filename=figure_file, 
+    bg = "white", width = 3000, height = 2000, res = 300)
+par(mar=c(6,6,6,3)) # c(bottom, left, top, right) 
+plot(bpc, col = groupColors, 
+     ylab="Intensity", xlab="Retention Time (sec)",
+     font.lab=1, cex.lab=1, cex.axis=1, font.main=1, cex.main=1, lwd = 1)
+legend("topright", 
+       legend=unique(pData(data)$SampleID), 
+       col=groupColors, lty=1, lwd=3, box.lty=0, cex=.5, bg="NA")
+dev.off()
+```
+
+## 2.2 Plot TIC
+
+```{r}
+
+figure_file <- file.path('..', 'images', 'TIC_centroided_notAligned.png')
+png(filename=figure_file, 
+    bg = "white", width = 3000, height = 2000, res = 300)
+par(mar=c(6,6,6,3)) # c(bottom, left, top, right) 
+plot(tic, col = groupColors, 
+     ylab="Intensity", xlab="Retention Time (sec)",
+     font.lab=1, cex.lab=1, cex.axis=1, font.main=1, cex.main=1, lwd = 1)
+legend("topright", 
+       legend=unique(pData(data_cent)$SampleCode), 
+       col=groupColors, lty=1, lwd=3, box.lty=0, cex=.5, bg="NA")
+dev.off()
+```
+
+# 3. Pre-processing 
+
+Pre-processing in untargeted metabolomics experiments aims at quantifying the signal from individual ion species in a data set. It consists of 3 steps: 
+*chromatographic peak detection, alignment, and correspondence*. 
+
+The resulting matrix of feature abundances can then be used as an input in downstream analyses.
+
+
+## 3.1 - Chromatographic peak detection
+
+Chromatographic peak detection aims to identify peaks along the retention time axis that represent the signal from individual compounds' ions.
+
+This is performed with the `findChromPeaks` function, and one of the available algorithms that can be configured with their respective parameter object. We'll use the *centWave* algorithm.
+
+**TEST ON SUBSET DATA:**
+
+```{r}
+## Set the CentWaveParam object
+cwp <- CentWaveParam(
+  peakwidth = c(10, 50),
+  ppm = 25, # default
+  snthresh = 0, # default
+  noise = 1.4e4,
+  mzdiff = -0.001,
+  prefilter = c(1, 100)
+)
+
+```
+
+```{r}
+data %>% 
+  filterRt(rt = c(900, 1200)) %>% 
+  filterMz(mz = c(300, 600)) %>% 
+  chromatogram(., aggregationFun="max") %>% 
+  findChromPeaks(., param = cwp) %>% 
+  plot(col = "indianred2", 
+     ylab="Intensity", xlab="Retention Time (sec)",
+     font.lab=1, cex.lab=1, cex.axis=1, font.main=1, cex.main=1)
+```
+
+APPLY ON FULL DATA:
+
+```{r}
+data <- findChromPeaks(data, param = cwp)
+```
+
+The result from the `findChromPeaks` is `XCMSnExp` object, which contains all semi-pre-processed results, and by extending the `onDiskMSnExp` object, inherits all of its functionality.
+
+Extract information about number of peak detected per sample.
+
+
+```{r}
+chrom_peaks_df <- as.data.frame(chromPeaks(data)) %>% 
+  count(sample) %>% 
+  rename(sample = 'sample_index', n = 'total_peaks_detected') %>% 
+  left_join(rowid_to_column(pData(data)), by = c('sample_index' = 'rowid')) %>% 
+  select(-FileName)
+
+chrom_peaks_df
+```
+
+`plotChromPeakImage` plots the number of detected peaks for each sample along the retention time axis as an image plot, i.e. with the number of peaks detected in each bin along the retention time represented with the color of the respective cell.
+
+```{r}
+figure_file <- file.path('images', 'ChromPeakImage_e4.png')
+png(filename=figure_file, 
+    bg = "white", width = 3000, height = 2000, res = 300)
+par(mar=c(5,6,1,1)) # c(bottom, left, top, right) 
+colfunc <- colorRampPalette(c("papayawhip", "chocolate4"))
+plotChromPeakImage(data, 
+                   binSize=100, 
+                   xlab="Retention time (sec)", 
+                   col = colfunc(100),
+                   cex.sub = 0.5,
+                   yaxt = "n")
+axis(2, 
+     at = seq(0,1, length.out = 4), 
+     labels = pData(data)$SampleID, 
+     cex.axis = 1,
+     las = 2)
+dev.off()
+```
+
+## 3.2 - Alignment
+
+LC-MS is affected by variances between measurements runs. These variances lead to shifts in retention times between samples. The aim of the alignment step is to adjust these retention time differences between samples of an experiment.
+
+Alignment is performed in two steps:
+
+- Firstly, we group peaks across samples which is accomplished by the `groupChromPeaks` function of correspondence analysis method. More details of the correspondence analysis are provided in the next section.
+- Secondly, we perform the alignment. Alignment can be performed with `xcms` `adjustRtime` function. This functions supports two alignment algorithms: *peakGroups* and *obiwarp*. The parameters for these algorithms can be defined with the `PeakGroupsParam` and `ObiwarpParam`, respectively. 
+
+The *obiwarp* algorithm performs the alignment of multiple samples against a center sample. The *peakGroups* performs alignment based on detected peaks in all/most samples, so these detected peaks correspond to housekeeping compounds.
+
+In my own experience, using *obiwarp* isn't suitable for sample spectra that are quite distinct. So, I prefer to use *peakGroups*.
+
+TEST ON SUBSET
+
+```{r}
+## Group peaks (these parameters will be used in correspondence too)
+mfraction <- 0.5
+min_samples <-  1
+bandwith <- 30 # default 30, it's bandwidth (standard deviation ot the smoothing kernel)
+size_overlap_slices <-  0.25 # default
+
+## a - define PeakDensityParam
+pdp <- PeakDensityParam(sampleGroups = data$SampleID, 
+                        bw = bandwith, 
+                        minFraction = mfraction, 
+                        minSamples = min_samples,
+                        binSize = size_overlap_slices)
+## Retention time correction using default parameters
+## b - define PeakGroupsParam
+pgp <- PeakGroupsParam(minFraction = mfraction)
+
+rtw <- c(500, 1300)
+
+## adjusted
+data %>% 
+  filterRt(rt = rtw) %>% 
+  groupChromPeaks(., pdp) %>% 
+  adjustRtime(., param = pgp) %>% 
+  plotAdjustedRtime(.,
+                  col = groupColors, 
+                  xlab="Retention Time (sec)", 
+                  font.lab=2, cex.lab=2, cex.axis=2, 
+                  font.main=2, cex.main=2, lwd=2)
+```
+
+APPLY FULL DATA:
+
+```{r}
+## a - Group peaks
+data <- groupChromPeaks(data, pdp)
+## b - alignment
+data <- adjustRtime(data, param = pgp)
+```
+
+
+```{r}
+## test if object has adjusted retention time
+hasAdjustedRtime(data)
+```
+
+Retention time correction with either *obiwarp* or *peakGroups* is performed on all spectra including MS>1 levels if present in the [data](https://rdrr.io/bioc/xcms/man/adjustRtime-peakGroups.html)
+
+
+## 3.3 - Correspondence
+
+The aim of the correspondence step is to group chromatographic peaks from the same ion across samples into a *feature*. Correspondence is done by using `groupDensityPeaks` function. There are two algorithms that can be used in this function: *peak density* or *nearest*, which can be configured by passed by `PeakDensityParam` and `NearestPeaksParam` objects. 
+
+We'll use *peak density* algorithm. This algorithm iterates through m/z slices in the data and groups chromatographic peaks to features in each slide (within the same or across samples) depending on their retention time and the distribution of chromatographic peaks along the retention time axis. Peaks representing signal from the same ion are expected to have a similar retention time and, if found in many samples, this signal should also be reflected by a higher peak density at the respective retention time.
+
+
+```{r}
+## define PeakDensityParam
+pdp <- PeakDensityParam(sampleGroups= data$SampleID, 
+                        bw = bandwith,
+                        minFraction = mfraction,
+                        binSize = size_overlap_slices)
+
+data %>% 
+  filterRt(rt = c(900, 1200)) %>% 
+  filterMz(mz = c(300, 600), aggregationFun="max") %>% 
+  plotChromPeakDensity(., param=pdp)
+```
+
+```{r}
+## perform correspondence analysis
+data <- groupChromPeaks(data, param=pdp)
+```
+
+
+## 3.4 - Fill-in missing values
+
+Missing values occur if no chromatographic peak was assigned to a feature either because peak detection failed, or because the corresponding ion is absent in the respective sample.
+
+
+```{r}
+## determine the number of missing values
+number_na_i = sum(is.na(featureValues(data)))
+number_na_i
+```
+
+Fill-in missing peak data by a specified ppm (2) and expanding the mz range by mz width/4 (0.25)
+
+```{r warning=False}
+## a - define parameter
+fpp <- FillChromPeaksParam(ppm = 2, expandMz = 0.25)
+## b - fill in
+data <- fillChromPeaks(data, param=fpp)
+```
+
+Determine the number of missing values after filling in:
+
+```{r}
+## remaining number of na values
+number_na_f = sum(is.na(featureValues(data)))
+number_na_f
+
+## determine number of filled peaks
+number_na_i - number_na_f
+```
+
+
+--> End of preprocessing
+
+# 4. Feature Correspondence
+
+```{r}
+## extract feature values after filling in
+fmat_fld <- as.data.frame(featureValues(data, value="into", method="maxint"))
+
+## replace NA with zero
+fmat_fld[is.na(fmat_fld)] <- 0 
+colnames(fmat_fld) <- as.vector(metadata$SampleID)
+
+# table_file <- file.path('tables','featureCorrespondence_e4.csv')
+# write.csv(file=table_file, fmat_fld)
+```
+
+# 5. Feature Definitions
+
+```{r}
+## get feature definitions and intensities
+featuresDef <- as.data.frame(featureDefinitions(data))
+
+## merge feature definitions with correspondencce
+dataTable <- merge(featuresDef, fmat_fld, by = 0, all = TRUE)
+dataTable <- dataTable[, !(colnames(dataTable) %in% c("peakidx"))]
+colnames(dataTable)[1] <- "Features"
+table_file <- file.path('tables','featureDefinitions_e4.csv')
+write.csv(dataTable, table_file, quote = FALSE, row.names = FALSE)
+```
+
+## 6. Saving Spectra information
+
+```{r}
+## spectra information of pre-processed data
+## these data are useful for cloud plots
+fdata <- fData(data)
+table_file <- file.path('tables','spectraInformation_e4.csv')
+write.csv(fdata, table_file)
+```
+
+# 7. Extracting MS2
+
+```{r}
+# I modified the source function to write the feature name as the title of each MS2
+source('modified_writeMgfData.R')
+```
+
+```{r warning=FALSE}
+## export the individual spectra into a .mgf file
+filteredMs2Spectra <- featureSpectra(data, return.type = "MSpectra", msLevel = 2)
+
+filteredMs2Spectra <- clean(filteredMs2Spectra, all = TRUE)
+
+filteredMs2Spectra <- formatSpectraForGNPS(filteredMs2Spectra) # this is one of the custom funtions
+
+filteredMs2Spectra_consensus <- combineSpectra(filteredMs2Spectra, 
+                                               fcol = "feature_id", 
+                                               method = consensusSpectrum, 
+                                               mzd = 0, 
+                                               minProp = 0.5, 
+                                               ppm = 25,
+                                               intensityFun = median,
+                                               mzFun = median)
+
+mod_writeMgfDataFile(filteredMs2Spectra_consensus,
+                          "ms2spectra_consensus.mgf")
+```
+
+# 8. Various plots
+
+```{r}
+# tic <- chromatogram(data_cent, aggregationFun="sum")
+# bpc <- chromatogram(data_cent, aggregationFun="max")
+```
+
+```{r}
+# dev.off()
+# figure_file <- file.path('images', 'BPC_centroided_Aligned_e4.png')
+# png(filename=figure_file, 
+#     bg = "white", width = 3000, height = 2000, res = 300)
+# par(mar=c(6,6,6,3)) # c(bottom, left, top, right) 
+# plot(bpc, col = groupColors, 
+#      ylab="Intensity", xlab="Retention Time (sec)",
+#      font.lab=1, cex.lab=1, cex.axis=1, font.main=1, cex.main=1, lwd = 1)
+# legend("topright", 
+#        legend=unique(pData(data_cent)$SampleCode), 
+#        col=groupColors, lty=1, lwd=3, box.lty=0, cex=.5, bg="NA")
+# dev.off()
+# 
+# figure_file <- file.path('images', 'TIC_centroided_Aligned_e4.png')
+# png(filename=figure_file, 
+#     bg = "white", width = 3000, height = 2000, res = 300)
+# par(mar=c(6,6,6,3)) # c(bottom, left, top, right) 
+# plot(tic, col = groupColors, 
+#      ylab="Intensity", xlab="Retention Time (sec)",
+#      font.lab=1, cex.lab=1, cex.axis=1, font.main=1, cex.main=1, lwd = 1)
+# legend("topright", 
+#        legend=unique(pData(data_cent)$SampleCode), 
+#        col=groupColors, lty=1, lwd=3, box.lty=0, cex=.5, bg="NA")
+# dev.off()
+```
+
+```{r}
+# figure_file <- file.path('images', 'Heatmap_aligned_e4.png')
+# png(filename=figure_file,
+#     bg = "white", width = 3000, height = 2000, res = 300)
+par(mar=c(5,6,1,1)) # c(bottom, left, top, right) 
+colfunc <- colorRampPalette(c("papayawhip", "chocolate4"))
+plotChromPeakImage(data_cent, 
+                   binSize=100, 
+                   xlab="Retention time (sec)", 
+                   col = colfunc(100),
+                   cex.sub = 0.5,
+                   yaxt = "n")
+axis(2, 
+     at = seq(0,1, length.out = 8), 
+     labels = pData(data_cent)$SampleCode, 
+     cex.axis = 1,
+     las = 2)
+# dev.off()
+```
+
+
+## 8 - Save pre-processed RData
+
+
+```{r}
+save.image(file = "xcms_pre-processed.RData")
+```
+

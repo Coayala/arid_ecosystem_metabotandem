@@ -35,5 +35,21 @@ USER jovyan
 
 WORKDIR /home/jovyan/work/
 
-# Add scripts for running SIRIUS
+RUN mkdir -p data A_preprocessing B_annotation_GNPS C_annotation_SIRIUS
 
+# Add scripts for running the container
+
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/1_data_import.ipynb /home/jovyan/work/A_preprocessing/1_data_import.ipynb
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/2_data_preprocessing.ipynb /home/jovyan/work/A_preprocessing/2_data_preprocessing.ipynb 
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/modified_writeMgfData.R /home/jovyan/work/A_preprocessing/modified_writeMgfData.R
+
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/B_annotation_GNPS/0_fixing_GNPS_output.ipynb /home/jovyan/work/B_annotation_GNPS/0_fixing_GNPS_output.ipynb
+
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/1_ms2_into_groups.ipynb /home/jovyan/work/C_annotation_SIRIUS/1_ms2_into_groups.ipynb
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/2_running_SIRIUS.ipynb /home/jovyan/work/C_annotation_SIRIUS/2_running_SIRIUS.ipynb
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/3_fix_sirius_output.ipynb /home/jovyan/work/C_annotation_SIRIUS/3_fix_sirius_output.ipynb
+ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/run_sirius_cli.sh /home/jovyan/work/C_annotation_SIRIUS/run_sirius_cli.sh
+
+# Make executables scripts
+
+RUN chmod +x /home/jovyan/work/C_annotation_SIRIUS/run_sirius_cli.sh

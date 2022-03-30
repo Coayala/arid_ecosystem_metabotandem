@@ -25,31 +25,23 @@ RUN pip install natsort
 
 # Download SIRIUS
 
-RUN wget https://bio.informatik.uni-jena.de/repository/dist-release-local/de/unijena/bioinf/ms/sirius/4.6.1/sirius-4.6.1-linux64-headless.zip
-RUN unzip sirius-4.6.1-linux64-headless.zip
+RUN wget https://github.com/boecker-lab/sirius/releases/download/v4.9.12/sirius-4.9.12-linux64-headless.zip
+RUN unzip sirius-4.9.12-linux64-headless.zip
 RUN echo "export SIRIUS=/home/jovyan/sirius/bin/sirius" >> /home/jovyan/.bashrc
 
-# Create working directory
+CMD ["start.sh"]
+
+# Creating directory for scripts
 
 USER jovyan
 
+RUN git clone https://github.com/Coayala/MetaboTandem.git
+
+# Create data and working directory
+
+RUN mkdir /home/jovyan/data
 WORKDIR /home/jovyan/work/
 
-RUN mkdir -p data A_preprocessing B_annotation_GNPS C_annotation_SIRIUS
+# Setting up container start-up
 
-# Add scripts for running the container
-
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/1_data_import.ipynb /home/jovyan/work/A_preprocessing/1_data_import.ipynb
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/2_data_preprocessing.ipynb /home/jovyan/work/A_preprocessing/2_data_preprocessing.ipynb 
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/A_preprocessing/modified_writeMgfData.R /home/jovyan/work/A_preprocessing/modified_writeMgfData.R
-
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/B_annotation_GNPS/0_fixing_GNPS_output.ipynb /home/jovyan/work/B_annotation_GNPS/0_fixing_GNPS_output.ipynb
-
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/1_ms2_into_groups.ipynb /home/jovyan/work/C_annotation_SIRIUS/1_ms2_into_groups.ipynb
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/2_running_SIRIUS.ipynb /home/jovyan/work/C_annotation_SIRIUS/2_running_SIRIUS.ipynb
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/3_fix_sirius_output.ipynb /home/jovyan/work/C_annotation_SIRIUS/3_fix_sirius_output.ipynb
-ADD --chown=1000:1000 https://raw.githubusercontent.com/Coayala/MetaboTandem/main/scripts/C_annotation_SIRIUS/run_sirius_cli.sh /home/jovyan/work/C_annotation_SIRIUS/run_sirius_cli.sh
-
-# Make executables scripts
-
-RUN chmod +x /home/jovyan/work/C_annotation_SIRIUS/run_sirius_cli.sh
+COPY start.sh /usr/local/bin
